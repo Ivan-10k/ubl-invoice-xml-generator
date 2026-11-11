@@ -1,0 +1,4 @@
+Text
+   xsdata[cli,lxml,soap]
+   pytest
+   lxml
