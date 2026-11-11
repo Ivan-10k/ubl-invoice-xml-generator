@@ -1,4 +1,4 @@
-Text
-   xsdata[cli,lxml,soap]
-   pytest
-   lxml
+xsdata[cli, lxml, soap]
+lxml
+pytest
+pytest-cov

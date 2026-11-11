@@ -1,45 +1,109 @@
-import xml.etree.ElementTree as ET
+"""Unit tests for XML generation (UBL Invoice 2.1)."""
+import pytest
+from lxml import etree
+
 from invoice import Invoice
 
-def test_generacion_basica_pizarra():
-    """Prueba unitaria exacta con el código de la imagen de clase"""
-    factura = Invoice('F001-524')
-    factura.duedate = '20/02/2020'
-    factura.line.add
-    factura.line[0].quantity = 5
+NS = {
+    "inv": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
+    "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+    "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+}
 
-    xml_str = factura.genXML()
 
-    # 1. Verifica que devuelva contenido y sea un XML con formato válido
-    assert xml_str is not None
-    root = ET.fromstring(xml_str.encode('utf-8'))
-    assert root is not None
+def parse(xml: str):
+    return etree.fromstring(xml.encode("utf-8"))
 
-    # 2. Verifica que los datos asignados estén dentro de las etiquetas XML
-    assert 'F001-524' in xml_str
-    assert '2020-02-20' in xml_str
-    assert '>5<' in xml_str
 
-def test_multiples_lineas_factura():
-    """Prueba unitaria agregando más de un ítem a la factura"""
-    factura = Invoice('F001-525')
-    factura.line.add
-    factura.line[0].quantity = 2
-    factura.line.add
-    factura.line[1].quantity = 10
+def text(root, xpath):
+    return [e.text for e in root.xpath(xpath, namespaces=NS)]
 
-    xml_str = factura.genXML()
 
-    assert 'F001-525' in xml_str
-    assert '>2<' in xml_str
-    assert '>10<' in xml_str
-    
-def test_validation_contra_xsd():
-    """Verifica que el XML generado cumple 100% con el archivo XSD oficial"""
-    factura = Invoice('F001-524')
-    factura.duedate = '2020-02-20' # Formato estándar XSD YYYY-MM-DD
-    factura.line.add
-    factura.line[0].quantity = 5
+@pytest.fixture
+def factura():
+    f = Invoice("F001-524")
+    f.duedate = "20/02/2020"
+    f.line.add
+    f.line[0].quantity = 5
+    return f
 
-    assert factura.validateXML() is True
-    
+
+def test_generacion_basica(factura):
+    root = parse(factura.genXML())
+    assert root.tag == "{%s}Invoice" % NS["inv"]
+    assert text(root, "/inv:Invoice/cbc:ID") == ["F001-524"]
+    assert text(root, "//cac:InvoiceLine/cbc:InvoicedQuantity") == ["5"]
+
+
+def test_fecha_vencimiento_se_convierte_a_iso():
+    f = Invoice("F001-1")
+    f.issuedate = "2021-01-01"      # distinta de duedate para probar cada campo
+    f.duedate = "20/02/2020"
+    f.line.add
+    root = parse(f.genXML())
+    assert text(root, "/inv:Invoice/cbc:IssueDate") == ["2021-01-01"]
+    assert text(root, "/inv:Invoice/cbc:DueDate") == ["2020-02-20"]
+
+
+def test_sin_duedate_no_emite_etiqueta():
+    f = Invoice("F001-2")
+    f.line.add
+    assert text(parse(f.genXML()), "/inv:Invoice/cbc:DueDate") == []
+
+
+def test_multiples_lineas_y_numeracion():
+    f = Invoice("F001-525")
+    f.line.add
+    f.line[0].quantity = 2
+    f.line.add
+    f.line[1].quantity = 10
+    root = parse(f.genXML())
+    assert text(root, "//cac:InvoiceLine/cbc:ID") == ["1", "2"]
+    assert text(root, "//cac:InvoiceLine/cbc:InvoicedQuantity") == ["2", "10"]
+
+
+def test_total_es_suma_de_lineas():
+    f = Invoice("F001-3")
+    f.line.add
+    f.line[0].amount = 100.5
+    f.line.add
+    f.line[1].amount = 50
+    root = parse(f.genXML())
+    assert float(text(root, "//cac:LegalMonetaryTotal/cbc:PayableAmount")[0]) == 150.5
+
+
+@pytest.mark.parametrize("n_lineas", [1, 3])
+def test_xml_valido_contra_xsd(n_lineas):
+    f = Invoice("F001-524")
+    f.duedate = "2020-02-20"
+    for _ in range(n_lineas):
+        f.line.add
+    assert f.validateXML() is True, f.last_errors
+
+
+def test_caracteres_especiales_se_escapan():
+    f = Invoice('F001<&>"x')
+    f.line.add
+    xml = f.genXML()
+    assert "&lt;&amp;&gt;" in xml
+    assert text(parse(xml), "/inv:Invoice/cbc:ID") == ['F001<&>"x']
+
+
+# ---- Casos negativos ----
+def test_factura_sin_lineas_falla():
+    with pytest.raises(ValueError):
+        Invoice("F001-9").genXML()
+
+
+def test_fecha_invalida_falla():
+    f = Invoice("F001-9")
+    f.duedate = "31-02-2020"
+    f.line.add
+    with pytest.raises(ValueError):
+        f.genXML()
+
+
+@pytest.mark.parametrize("bad_id", ["", "   ", None])
+def test_id_vacio_falla(bad_id):
+    with pytest.raises(ValueError):
+        Invoice(bad_id)
