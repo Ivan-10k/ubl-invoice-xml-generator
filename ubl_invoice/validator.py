@@ -1,20 +1,14 @@
 """Capa de validacion: XML contra el XSD de UBL 2.1 (lxml)."""
-from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
 from lxml import etree
 
+from ubl_invoice.ports import ValidationResult
+
+__all__ = ["DEFAULT_XSD", "ValidationResult", "XsdValidator"]
+
 DEFAULT_XSD = Path(__file__).resolve().parent.parent / "xsd" / "maindoc" / "UBL-Invoice-2.1.xsd"
-
-
-@dataclass
-class ValidationResult:
-    valid: bool
-    errors: list = field(default_factory=list)
-
-    def __bool__(self) -> bool:
-        return self.valid
 
 
 @lru_cache(maxsize=4)
