@@ -14,8 +14,10 @@ inyección XML, alto acoplamiento y dificultad para seguir cambios del esquema.
 1. **XML Data Binding:** `xsdata` genera clases Python (`ubl_models.py`) desde los XSD
    oficiales (carpeta `xsd/`). El XML se obtiene serializando objetos, sin plantillas.
    El escape de caracteres especiales lo hace el serializador (hay una prueba que lo verifica).
-2. **Facade (`invoice.py`):** la clase `Invoice` expone una interfaz simple y oculta la
-   complejidad de UBL: mapea el dominio a las clases del XSD, serializa y valida contra el XSD.
+2. **Facade (`ubl_invoice/facade.py`):** la clase `Invoice` expone una interfaz simple y oculta la
+   complejidad de UBL, orquestando las capas de mapeo, serialización y validación.
+3. **Arquitectura en capas:** cada responsabilidad vive en su propio módulo y las
+   dependencias apuntan hacia el dominio (ver sección 2).
 
 Limitación declarada: el documento cumple el XSD 2.1, pero **no** implementa las reglas
 adicionales de SUNAT (RUC, tipo de comprobante, etc.).
@@ -23,10 +25,33 @@ adicionales de SUNAT (RUC, tipo de comprobante, etc.).
 ## 2. Arquitectura
 
 ```
-Usuario ──> Invoice (Facade/dominio) ──> _to_ubl() (mapeo) ──> ubl_models.py (clases del XSD)
-                                      └─> XmlSerializer (xsdata) ──> XML
-                                      └─> validate_xml() (lxml + XSD)
+                    ┌──────────────────────────┐
+  Usuario ────────> │ facade.py  (Invoice)     │  orquesta
+                    └────┬──────┬───────┬──────┘
+                         │      │       │
+              ┌──────────▼┐ ┌───▼─────┐ ┌▼───────────┐
+              │ mapper.py │ │serializ.│ │ validator  │
+              │ dominio → │ │ UBL →   │ │ XML vs XSD │
+              │ UBL       │ │ XML     │ │ (lxml)     │
+              └─────┬─────┘ │(xsdata) │ └────────────┘
+                    │       └─────────┘
+        ┌───────────▼───────────┐      ┌────────────────────────┐
+        │ domain.py             │      │ ubl_models.py (xsdata) │
+        │ entidades y reglas    │      │ clases generadas       │
+        │ (sin dependencias)    │      └────────────────────────┘
+        └───────────────────────┘
 ```
+
+| Capa | Módulo | Responsabilidad | Depende de |
+|---|---|---|---|
+| Fachada | `facade.py` | Interfaz pública `Invoice` | todas las demás |
+| Dominio | `domain.py` | Entidades, reglas de negocio (moneda, fechas, total) | nada externo |
+| Mapeo | `mapper.py` | Dominio → clases UBL | dominio, `ubl_models` |
+| Serialización | `serializer.py` | Clases UBL → texto XML | xsdata |
+| Validación | `validator.py` | XML → conforme al XSD 2.1 | lxml |
+
+Una prueba automática (`test_dominio_no_depende_de_infraestructura`) garantiza que el
+dominio no importe xsdata, lxml ni las clases generadas.
 
 ## 3. Uso
 
@@ -51,14 +76,16 @@ print(factura.validateXML())   # True si cumple el XSD
 ```bash
 pip install -r requirements.txt
 pytest -v
-pytest --cov=invoice --cov-report=term-missing
+pytest --cov=ubl_invoice --cov-report=term-missing
 ```
 
 ## 5. Estructura
 
 | Ruta | Contenido |
 |---|---|
-| `invoice.py` | Fachada, mapeo, serialización y validación |
+| `invoice.py` | Punto de entrada de compatibilidad (`from invoice import Invoice`) |
+| `ubl_invoice/` | Paquete con las capas: `domain`, `mapper`, `serializer`, `validator`, `facade` |
 | `ubl_models.py` | Clases generadas con xsdata (no editar a mano) |
 | `xsd/` | Esquemas oficiales UBL 2.1 |
-| `test_invoice.py` | Pruebas unitarias de generación |
+| `test_invoice.py` | Pruebas de generación de XML (extremo a extremo) |
+| `test_layers.py` | Pruebas unitarias aisladas por capa |
