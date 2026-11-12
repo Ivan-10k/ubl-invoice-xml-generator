@@ -31,12 +31,16 @@ Usuario ──> Invoice (Facade/dominio) ──> _to_ubl() (mapeo) ──> ubl_m
 ## 3. Uso
 
 ```python
-from invoice import Invoice
+from invoice import Invoice, PartyInfo
 
 factura = Invoice('F001-524')
 factura.duedate = '20/02/2020'
 factura.line.add
 factura.line[0].quantity = 5
+
+factura.currency = 'PEN'                      # moneda ISO 4217 (por defecto PEN)
+factura.supplier = PartyInfo('Mi Empresa SAC', '20123456789')   # emisor
+factura.customer = PartyInfo('Cliente Demo', '10456789012')     # cliente
 
 xml = factura.genXML()
 print(factura.validateXML())   # True si cumple el XSD

@@ -2,7 +2,7 @@
 import pytest
 from lxml import etree
 
-from invoice import Invoice
+from invoice import Invoice, PartyInfo
 
 NS = {
     "inv": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
@@ -107,3 +107,44 @@ def test_fecha_invalida_falla():
 def test_id_vacio_falla(bad_id):
     with pytest.raises(ValueError):
         Invoice(bad_id)
+
+# ---- Emisor, cliente, moneda y version UBL ----
+def test_emisor_y_cliente_en_el_xml():
+    f = Invoice("F001-10")
+    f.supplier = PartyInfo("Mi Empresa SAC", "20123456789")
+    f.customer = PartyInfo("Cliente Demo", "10456789012")
+    f.line.add
+    root = parse(f.genXML())
+    sup = "//cac:AccountingSupplierParty/cac:Party"
+    cus = "//cac:AccountingCustomerParty/cac:Party"
+    assert text(root, sup + "/cac:PartyIdentification/cbc:ID") == ["20123456789"]
+    assert text(root, sup + "/cac:PartyLegalEntity/cbc:RegistrationName") == ["Mi Empresa SAC"]
+    assert text(root, cus + "/cac:PartyName/cbc:Name") == ["Cliente Demo"]
+    assert f.validateXML() is True, f.last_errors
+
+
+def test_moneda_configurable_se_refleja_en_todos_los_importes():
+    f = Invoice("F001-11")
+    f.currency = "usd"
+    f.line.add
+    f.line[0].amount = 10
+    root = parse(f.genXML())
+    assert text(root, "/inv:Invoice/cbc:DocumentCurrencyCode") == ["USD"]
+    monedas = root.xpath("//*[@currencyID]/@currencyID", namespaces=NS)
+    assert monedas and set(monedas) == {"USD"}
+    assert f.validateXML() is True, f.last_errors
+
+
+@pytest.mark.parametrize("bad", ["", "US", "DOLAR", "12$", None])
+def test_moneda_invalida_falla(bad):
+    f = Invoice("F001-12")
+    f.currency = bad
+    f.line.add
+    with pytest.raises(ValueError):
+        f.genXML()
+
+
+def test_version_ubl_2_1():
+    f = Invoice("F001-13")
+    f.line.add
+    assert text(parse(f.genXML()), "/inv:Invoice/cbc:UBLVersionID") == ["2.1"]
