@@ -111,17 +111,41 @@ factura.duedate = '20/02/2020'
 factura.line.add
 factura.line[0].quantity = 5
 factura.line[0].unit_price = 20.0             # importe de la línea = 5 x 20 = 100.00
+factura.tax_rate = 0.18                       # IGV 18 % (opcional; sin tasa no se emite impuesto)
 
 factura.currency = 'PEN'                      # moneda ISO 4217 (por defecto PEN)
 factura.supplier = PartyInfo('Mi Empresa SAC', '20123456789')   # emisor
 factura.customer = PartyInfo('Cliente Demo', '10456789012')     # cliente
 
+# Una línea puede tener tasa propia: factura.line[0].tax_rate = 0  (exonerada)
 # Alternativa: asignar el importe a mano con factura.line[0].amount = 100
 # (si se asignan ambos, deben coincidir o se lanza ValueError)
 
 xml = factura.genXML()
 print(factura.validateXML())   # True si cumple el XSD
 ```
+
+### Impuestos (IGV)
+
+Los impuestos son **opcionales**: sin `tax_rate` la factura sale sin elementos de impuesto,
+igual que antes. Con `factura.tax_rate = 0.18` el XML incluye:
+
+- `cac:TaxTotal` en **cada línea** (base imponible, impuesto y categoría).
+- `cac:TaxTotal` en la **factura**, con un `cac:TaxSubtotal` por cada tasa distinta.
+- `cac:LegalMonetaryTotal` con subtotal, base sin impuesto, total con impuesto y monto a pagar.
+
+Reglas de cálculo:
+
+| Regla | Detalle |
+|---|---|
+| Tasa | Fracción entre 0 y 1 (`0.18`). Un valor como `18` lanza `ValueError`. |
+| Tasa por línea | `linea.tax_rate` reemplaza a la de la factura (`0` = exonerada, categoría `Z`). |
+| Redondeo | 2 decimales, mitad hacia arriba (`0.125 → 0.13`), no el redondeo bancario de Python. |
+| Impuesto de la factura | Suma de los impuestos de cada línea ya redondeados, para que los totales cuadren con las líneas. |
+| Esquema | `TaxScheme` ID `1000`, nombre `IGV`, tipo `VAT`; categoría `S` (tasa general) o `Z` (tasa cero). |
+
+Limitación declarada: se modela IGV con los códigos básicos; no se implementa el catálogo
+completo de afectaciones de SUNAT (exonerado `9997`, inafecto `9998`, ISC, etc.).
 
 ## 4. Instalación y pruebas
 

@@ -121,3 +121,44 @@ def test_total_redondea_a_dos_decimales():
         f.line[-1].quantity = 1
         f.line[-1].unit_price = 0.1
     assert f.total == 0.3
+
+
+# ---- Dominio: impuestos ----
+def test_money_redondea_mitad_hacia_arriba():
+    from ubl_invoice.domain import money
+
+    assert money(0.125) == 0.13          # round() de Python daria 0.12
+    assert money(2.675) == 2.68          # round() de Python daria 2.67
+    assert money(0.30000000000000004) == 0.3
+
+
+def test_sin_tasa_no_hay_impuesto():
+    f = factura_valida()
+    assert not f.is_taxed
+    assert f.tax_total == 0 and f.total == f.subtotal == 30
+    assert f.tax_breakdown() == []
+
+
+def test_tasa_de_factura_y_override_por_linea():
+    f = factura_valida()                 # linea 1: importe 30
+    f.tax_rate = 0.18
+    f.line.add
+    f.line[1].amount = 100
+    f.line[1].tax_rate = 0               # exonerada
+    assert f.rate_for(f.line[0]) == 0.18 and f.rate_for(f.line[1]) == 0
+    assert f.line_tax(f.line[0]) == 5.4 and f.line_tax(f.line[1]) == 0
+    assert (f.subtotal, f.tax_total, f.total) == (130, 5.4, 135.4)
+
+
+def test_tax_breakdown_agrupa_por_tasa():
+    from ubl_invoice.domain import TaxGroup
+
+    f = InvoiceEntity("F001-50")
+    f.tax_rate = 0.18
+    for monto in (10, 20):
+        f.line.add
+        f.line[-1].amount = monto
+    f.line.add
+    f.line[2].amount = 5
+    f.line[2].tax_rate = 0.10
+    assert f.tax_breakdown() == [TaxGroup(0.10, 5, 0.5), TaxGroup(0.18, 30, 5.4)]

@@ -197,3 +197,81 @@ def test_valores_negativos_fallan(campo, valor):
     setattr(f.line[0], campo, valor)
     with pytest.raises(ValueError, match="negativ"):
         f.genXML()
+
+
+# ---- Impuestos (IGV) ----
+def factura_con_igv():
+    f = Invoice("F001-40")
+    f.tax_rate = 0.18
+    f.line.add
+    f.line[0].quantity = 2
+    f.line[0].unit_price = 50            # base 100.00 -> IGV 18.00
+    return f
+
+
+def test_sin_tax_rate_no_hay_elementos_de_impuesto():
+    f = Invoice("F001-41")
+    f.line.add
+    f.line[0].amount = 100
+    root = parse(f.genXML())
+    assert root.xpath("//cac:TaxTotal", namespaces=NS) == []
+    assert float(text(root, "//cac:LegalMonetaryTotal/cbc:PayableAmount")[0]) == 100
+    assert root.xpath("//cac:LegalMonetaryTotal/cbc:TaxInclusiveAmount", namespaces=NS) == []
+
+
+def test_igv_en_linea_totales_y_xsd():
+    f = factura_con_igv()
+    root = parse(f.genXML())
+    assert text(root, "//cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount") == ["18.0"]
+    assert text(root, "/inv:Invoice/cac:TaxTotal/cbc:TaxAmount") == ["18.0"]
+    assert text(root, "//cac:TaxSubtotal/cac:TaxCategory/cbc:Percent")[0] == "18"
+    assert text(root, "//cac:TaxScheme/cbc:ID")[0] == "1000"
+    assert text(root, "//cac:TaxScheme/cbc:Name")[0] == "IGV"
+    mon = "//cac:LegalMonetaryTotal/"
+    assert text(root, mon + "cbc:LineExtensionAmount") == ["100.0"]
+    assert text(root, mon + "cbc:TaxExclusiveAmount") == ["100.0"]
+    assert text(root, mon + "cbc:TaxInclusiveAmount") == ["118.0"]
+    assert text(root, mon + "cbc:PayableAmount") == ["118.0"]
+    assert f.validateXML() is True, f.last_errors
+
+
+def test_linea_con_tasa_propia_y_subtotales_por_tasa():
+    f = factura_con_igv()
+    f.line.add
+    f.line[1].quantity = 1
+    f.line[1].unit_price = 10.5
+    f.line[1].tax_rate = 0               # linea exonerada
+    root = parse(f.genXML())
+    cats = text(root, "/inv:Invoice/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory/cbc:ID")
+    assert cats == ["Z", "S"]            # un subtotal por tasa, de menor a mayor
+    assert text(root, "//cac:LegalMonetaryTotal/cbc:PayableAmount") == ["128.5"]
+    assert f.validateXML() is True, f.last_errors
+
+
+def test_impuesto_de_factura_es_suma_de_impuestos_de_linea():
+    f = Invoice("F001-42")
+    f.tax_rate = 0.18
+    for _ in range(3):
+        f.line.add
+        f.line[-1].amount = 0.35         # IGV por linea 0.063 -> 0.06
+    root = parse(f.genXML())
+    assert text(root, "//cac:InvoiceLine/cac:TaxTotal/cbc:TaxAmount") == ["0.06"] * 3
+    assert text(root, "/inv:Invoice/cac:TaxTotal/cbc:TaxAmount") == ["0.18"]
+    assert f.validateXML() is True, f.last_errors
+
+
+@pytest.mark.parametrize("tasa", [18, -0.1, 1.5])
+def test_tasa_invalida_en_factura_falla(tasa):
+    f = Invoice("F001-43")
+    f.tax_rate = tasa                    # 18 en vez de 0.18 es el error tipico
+    f.line.add
+    with pytest.raises(ValueError, match="tasa"):
+        f.genXML()
+
+
+def test_tasa_invalida_en_linea_falla():
+    f = Invoice("F001-44")
+    f.line.add
+    f.line[0].tax_rate = 18
+    with pytest.raises(ValueError, match="Linea 1"):
+        f.genXML()
