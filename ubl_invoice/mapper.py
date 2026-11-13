@@ -22,6 +22,8 @@ from ubl_models import (
     PartyLegalEntity,
     PartyName,
     PayableAmount,
+    Price,
+    PriceAmount,
     RegistrationName,
     UblversionId,
 )
@@ -50,6 +52,13 @@ def _party(info: PartyInfo, role_cls):
     return role_cls(party=party)
 
 
+def _price(item, currency):
+    """Precio unitario UBL; None si la linea no tiene precio."""
+    if item.unit_price is None:
+        return None
+    return Price(price_amount=PriceAmount(value=item.unit_price, currency_id=currency))
+
+
 class InvoiceMapper:
     def to_ubl(self, invoice: InvoiceEntity) -> UblInvoice:
         invoice.validate()
@@ -58,8 +67,9 @@ class InvoiceMapper:
             InvoiceLine(
                 id=Id(value=str(i)),
                 invoiced_quantity=InvoicedQuantity(value=item.quantity, unit_code=UNIT_CODE),
-                line_extension_amount=LineExtensionAmount(value=item.amount, currency_id=currency),
+                line_extension_amount=LineExtensionAmount(value=item.line_amount, currency_id=currency),
                 item=Item(description=[Description(value=item.description)]),
+                price=_price(item, currency),
             )
             for i, item in enumerate(invoice.line, start=1)
         ]

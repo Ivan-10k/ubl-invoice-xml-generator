@@ -110,10 +110,14 @@ factura = Invoice('F001-524')
 factura.duedate = '20/02/2020'
 factura.line.add
 factura.line[0].quantity = 5
+factura.line[0].unit_price = 20.0             # importe de la línea = 5 x 20 = 100.00
 
 factura.currency = 'PEN'                      # moneda ISO 4217 (por defecto PEN)
 factura.supplier = PartyInfo('Mi Empresa SAC', '20123456789')   # emisor
 factura.customer = PartyInfo('Cliente Demo', '10456789012')     # cliente
+
+# Alternativa: asignar el importe a mano con factura.line[0].amount = 100
+# (si se asignan ambos, deben coincidir o se lanza ValueError)
 
 xml = factura.genXML()
 print(factura.validateXML())   # True si cumple el XSD

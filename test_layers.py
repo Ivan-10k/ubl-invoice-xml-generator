@@ -102,3 +102,22 @@ def test_validator_rechaza_xml_que_no_cumple_xsd():
     resultado = XsdValidator().validate(xml_malo)
     assert not resultado
     assert resultado.errors
+
+
+# ---- Dominio: linea con precio unitario ----
+def test_line_amount_prioridad_y_calculo():
+    from ubl_invoice.domain import InvoiceLineItem
+
+    assert InvoiceLineItem().line_amount == 0.0                                   # sin datos
+    assert InvoiceLineItem(quantity=3, unit_price=0.1).line_amount == 0.3         # calculado y redondeado
+    assert InvoiceLineItem(quantity=3, amount=50).line_amount == 50               # manual
+    assert InvoiceLineItem(quantity=2, unit_price=10, amount=20).line_amount == 20  # consistente
+
+
+def test_total_redondea_a_dos_decimales():
+    f = InvoiceEntity("F001-30")
+    for _ in range(3):
+        f.line.add
+        f.line[-1].quantity = 1
+        f.line[-1].unit_price = 0.1
+    assert f.total == 0.3

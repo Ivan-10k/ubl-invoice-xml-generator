@@ -5,6 +5,7 @@ reutilizar sin conocer UBL.
 """
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Optional
 
 DEFAULT_CURRENCY = "PEN"
 _DATE_FORMATS = ("%d/%m/%Y", "%Y-%m-%d")
@@ -22,9 +23,40 @@ def parse_date(value: str) -> date:
 
 @dataclass
 class InvoiceLineItem:
+    """Una linea de la factura.
+
+    El importe de la linea (`line_amount`) se obtiene asi:
+      - si se asigno `amount`, se usa tal cual;
+      - si no, y hay `unit_price`, se calcula cantidad x precio unitario (2 decimales);
+      - si no hay ninguno, es 0.
+    """
+
     quantity: float = 0
     description: str = "Producto generico"
-    amount: float = 0.0  # importe de la linea (LineExtensionAmount)
+    amount: Optional[float] = None      # importe manual de la linea (LineExtensionAmount)
+    unit_price: Optional[float] = None  # precio por unidad (opcional)
+
+    @property
+    def line_amount(self) -> float:
+        if self.amount is not None:
+            return self.amount
+        if self.unit_price is not None:
+            return round(self.quantity * self.unit_price, 2)
+        return 0.0
+
+    def validate(self, position: int) -> None:
+        """Reglas de la linea. `position` (1, 2, ...) solo sirve para el mensaje de error."""
+        if self.quantity < 0:
+            raise ValueError(f"Linea {position}: la cantidad no puede ser negativa.")
+        if self.unit_price is not None and self.unit_price < 0:
+            raise ValueError(f"Linea {position}: el precio unitario no puede ser negativo.")
+        if self.amount is not None and self.unit_price is not None:
+            esperado = round(self.quantity * self.unit_price, 2)
+            if abs(self.amount - esperado) > 0.005:
+                raise ValueError(
+                    f"Linea {position}: importe {self.amount} no coincide con "
+                    f"cantidad x precio = {esperado}."
+                )
 
 
 @dataclass
@@ -83,12 +115,14 @@ class InvoiceEntity:
 
     @property
     def total(self) -> float:
-        return sum(item.amount for item in self.line)
+        return round(sum(item.line_amount for item in self.line), 2)
 
     def validate(self) -> None:
         """Reglas de negocio. Lanza ValueError si la factura no se puede emitir."""
         self.currency_code
         if not self.line:
             raise ValueError("La factura necesita al menos una linea (el XSD exige InvoiceLine).")
+        for posicion, item in enumerate(self.line, start=1):
+            item.validate(posicion)
         self.issue_date
         self.due_date

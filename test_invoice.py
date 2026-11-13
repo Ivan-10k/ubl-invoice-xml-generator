@@ -148,3 +148,52 @@ def test_version_ubl_2_1():
     f = Invoice("F001-13")
     f.line.add
     assert text(parse(f.genXML()), "/inv:Invoice/cbc:UBLVersionID") == ["2.1"]
+
+# ---- Precio unitario ----
+def test_importe_se_calcula_con_precio_unitario():
+    f = Invoice("F001-20")
+    f.line.add
+    f.line[0].quantity = 3
+    f.line[0].unit_price = 0.1          # 3 x 0.1 debe dar 0.3 (no 0.30000000000000004)
+    root = parse(f.genXML())
+    assert text(root, "//cac:InvoiceLine/cbc:LineExtensionAmount") == ["0.3"]
+    assert text(root, "//cac:InvoiceLine/cac:Price/cbc:PriceAmount") == ["0.1"]
+    assert text(root, "//cac:LegalMonetaryTotal/cbc:PayableAmount") == ["0.3"]
+    assert f.validateXML() is True, f.last_errors
+
+
+def test_linea_sin_precio_unitario_no_emite_price():
+    f = Invoice("F001-21")
+    f.line.add
+    f.line[0].amount = 10
+    assert text(parse(f.genXML()), "//cac:InvoiceLine/cac:Price/cbc:PriceAmount") == []
+
+
+def test_total_con_varias_lineas_con_precio():
+    f = Invoice("F001-22")
+    for cantidad, precio in [(2, 10.5), (4, 2.25)]:
+        f.line.add
+        f.line[-1].quantity = cantidad
+        f.line[-1].unit_price = precio
+    root = parse(f.genXML())
+    assert float(text(root, "//cac:LegalMonetaryTotal/cbc:PayableAmount")[0]) == 30.0
+    assert f.validateXML() is True, f.last_errors
+
+
+def test_importe_inconsistente_con_precio_falla():
+    f = Invoice("F001-23")
+    f.line.add
+    f.line[0].quantity = 2
+    f.line[0].unit_price = 10
+    f.line[0].amount = 25               # deberia ser 20
+    with pytest.raises(ValueError, match="no coincide"):
+        f.genXML()
+
+
+@pytest.mark.parametrize("campo,valor", [("quantity", -1), ("unit_price", -5)])
+def test_valores_negativos_fallan(campo, valor):
+    f = Invoice("F001-24")
+    f.line.add
+    setattr(f.line[0], campo, valor)
+    with pytest.raises(ValueError, match="negativ"):
+        f.genXML()
