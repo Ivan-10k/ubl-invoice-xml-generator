@@ -3,3 +3,5 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+# XML generados al ejecutar save_xml() en la raiz del proyecto
+/*.xml

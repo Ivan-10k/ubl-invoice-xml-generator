@@ -6,6 +6,7 @@ se puede cambiar el serializador o el validador sin modificar `Invoice`
 (Abierto/Cerrado) y reemplazarlos por dobles de prueba.
 """
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from ubl_invoice.domain import InvoiceEntity
@@ -39,3 +40,10 @@ class XmlValidator(Protocol):
     """Valida un texto XML y devuelve el resultado."""
 
     def validate(self, xml: str) -> ValidationResult: ...
+
+
+@runtime_checkable
+class XmlWriter(Protocol):
+    """Guarda el texto XML como archivo y devuelve la ruta escrita."""
+
+    def write(self, xml: str, directory: Path, file_name: str) -> Path: ...

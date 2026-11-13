@@ -30,10 +30,12 @@ flowchart TD
     F --> M["mapper.py<br/>InvoiceMapper"]
     F --> S["serializer.py<br/>XmlInvoiceSerializer"]
     F --> V["validator.py<br/>XsdValidator"]
+    F --> W["storage.py<br/>XmlFileWriter"]
     M --> D["domain.py<br/>InvoiceEntity, PartyInfo, InvoiceLineItem"]
     M --> G["ubl_models.py<br/>clases generadas por xsdata"]
-    S --> X[("XML UBL 2.1")]
+    S --> X[("XML UBL 2.1<br/>ISO-8859-1")]
     V --> XSD[("UBL-Invoice-2.1.xsd")]
+    W --> FILE[("RUC-TIPO-SERIE-NUMERO.xml")]
     G -. generado desde .-> XSD
 ```
 
@@ -42,11 +44,13 @@ _Flujo: el usuario habla solo con la fachada; esta orquesta mapeo, serializació
 | Capa | Módulo | Responsabilidad | Depende de |
 |---|---|---|---|
 | Fachada | `facade.py` | Interfaz pública `Invoice`; recibe sus colaboradores por parámetro | `ports.py` (y las implementaciones por defecto) |
-| Puertos | `ports.py` | Contratos `UblMapper`, `XmlSerializer`, `XmlValidator` | dominio |
+| Puertos | `ports.py` | Contratos `UblMapper`, `XmlSerializer`, `XmlValidator`, `XmlWriter` | dominio |
 | Dominio | `domain.py` | Entidades, reglas de negocio (moneda, fechas, total) | nada externo |
 | Mapeo | `mapper.py` | Dominio → clases UBL | dominio, `ubl_models` |
 | Serialización | `serializer.py` | Clases UBL → texto XML | xsdata |
 | Validación | `validator.py` | XML → conforme al XSD 2.1 | lxml |
+| Almacenamiento | `storage.py` | XML → archivo físico `.xml` | `encoding.py` |
+| Codificación | `encoding.py` | ISO-8859-1 compartida por serializador, validador y escritor | nada externo |
 
 ### Inyección de dependencias (DIP y Abierto/Cerrado)
 
@@ -78,24 +82,32 @@ classDiagram
         <<interface>>
         +validate(xml) ValidationResult
     }
+    class XmlWriter {
+        <<interface>>
+        +write(xml, directory, file_name) Path
+    }
     class InvoiceEntity {
         +id
         +currency
         +line
         +total
+        +file_name
         +validate()
     }
     class Invoice {
         +gen_xml() str
         +validate_xml() bool
+        +save_xml() Path
     }
     InvoiceEntity <|-- Invoice
     Invoice o-- UblMapper
     Invoice o-- XmlSerializer
     Invoice o-- XmlValidator
+    Invoice o-- XmlWriter
     UblMapper <|.. InvoiceMapper
     XmlSerializer <|.. XmlInvoiceSerializer
     XmlValidator <|.. XsdValidator
+    XmlWriter <|.. XmlFileWriter
 ```
 
 Una prueba automática (`test_dominio_no_depende_de_infraestructura`) garantiza que el
@@ -113,6 +125,7 @@ factura.line[0].quantity = 5
 factura.line[0].unit_price = 20.0             # importe de la línea = 5 x 20 = 100.00
 factura.tax_rate = 0.18                       # IGV 18 % (opcional; sin tasa no se emite impuesto)
 
+factura.document_type = '01'                  # 01 = factura (por defecto), 03 = boleta
 factura.currency = 'PEN'                      # moneda ISO 4217 (por defecto PEN)
 factura.supplier = PartyInfo('Mi Empresa SAC', '20123456789')   # emisor
 factura.customer = PartyInfo('Cliente Demo', '10456789012')     # cliente
@@ -123,7 +136,28 @@ factura.customer = PartyInfo('Cliente Demo', '10456789012')     # cliente
 
 xml = factura.genXML()
 print(factura.validateXML())   # True si cumple el XSD
+
+ruta = factura.save_xml()      # escribe 20123456789-01-F001-524.xml en la carpeta actual
+print(ruta)
 ```
+
+### Archivo `.xml` y codificación
+
+`factura.save_xml()` (alias `saveXML()`) genera el XML, lo valida contra el XSD y lo escribe
+como archivo físico en la **carpeta de trabajo actual** (o en `save_xml('ruta/carpeta')`).
+
+| Aspecto | Regla |
+|---|---|
+| Nombre | `RUC-TIPO-SERIE-NUMERO.xml`, p. ej. `20123456789-01-F001-524.xml` |
+| RUC | Sale de `factura.supplier.tax_id`; debe tener 11 dígitos |
+| Tipo | `factura.document_type`: `01` factura (por defecto) o `03` boleta. Las notas de crédito/débito (`07`/`08`) usan otros esquemas UBL y no se soportan |
+| Serie y número | Salen del id de la factura: formato `SERIE-NUMERO` (4 caracteres en mayúscula, guion y hasta 8 dígitos). El número se conserva tal cual, para que coincida con `cbc:ID` |
+| Codificación | **ISO-8859-1**: el encabezado dice `encoding="ISO-8859-1"` y los bytes del archivo son realmente latin-1 (la `ñ` ocupa un byte) |
+| Caracteres fuera de latin-1 | Se escriben como referencia numérica (`€` → `&#8364;`): el XML sigue siendo válido y no se pierde texto |
+| Si el XML no cumple el XSD | Lanza `ValueError` y **no escribe nada** (`validate=False` omite la validación) |
+| Si el archivo ya existe | Se sobrescribe |
+
+Los archivos `.xml` generados en la raíz del proyecto están en el `.gitignore`.
 
 ### Impuestos (IGV)
 
@@ -162,7 +196,7 @@ pytest --cov=ubl_invoice --cov-report=term-missing
 | Ruta | Contenido |
 |---|---|
 | `invoice.py` | Punto de entrada de compatibilidad (`from invoice import Invoice`) |
-| `ubl_invoice/` | Paquete con las capas: `domain`, `ports`, `mapper`, `serializer`, `validator`, `facade` |
+| `ubl_invoice/` | Paquete con las capas: `domain`, `ports`, `mapper`, `serializer`, `validator`, `storage`, `encoding`, `facade` |
 | `ubl_models.py` | Clases generadas con xsdata (no editar a mano; ver sección 6) |
 | `scripts/regenerar_modelos.py` | Regenera / verifica `ubl_models.py` desde el XSD |
 | `xsd/` | Esquemas oficiales UBL 2.1 |
@@ -170,6 +204,7 @@ pytest --cov=ubl_invoice --cov-report=term-missing
 | `test_layers.py` | Pruebas unitarias aisladas por capa |
 | `test_injection.py` | Pruebas de inyección de dependencias con dobles de prueba |
 | `test_regeneracion.py` | Pruebas del script de regeneración |
+| `test_files.py` | Pruebas del nombre de archivo, la codificación ISO-8859-1 y la escritura |
 
 ## 6. Regenerar los modelos (`ubl_models.py`)
 

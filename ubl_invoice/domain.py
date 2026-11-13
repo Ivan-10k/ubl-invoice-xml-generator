@@ -3,12 +3,19 @@
 No depende de xsdata, lxml ni de las clases generadas: se puede probar y
 reutilizar sin conocer UBL.
 """
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import List, Optional
 
 DEFAULT_CURRENCY = "PEN"
+# Tipos de documento (catalogo 01 de SUNAT) que se emiten con el esquema UBL Invoice.
+# Notas de credito (07) y debito (08) usan otros esquemas (CreditNote/DebitNote).
+DOCUMENT_TYPES = {"01": "Factura", "03": "Boleta de venta"}
+DEFAULT_DOCUMENT_TYPE = "01"
+_RUC = re.compile(r"^\d{11}$")
+_SERIE_NUMERO = re.compile(r"^([A-Z0-9]{4})-(\d{1,8})$")
 _DATE_FORMATS = ("%d/%m/%Y", "%Y-%m-%d")
 
 
@@ -114,6 +121,7 @@ class InvoiceEntity:
         self.id = invoice_id
         self.issuedate = "2020-02-20"
         self.duedate = None
+        self.document_type = DEFAULT_DOCUMENT_TYPE  # 01 = factura, 03 = boleta
         self.currency = DEFAULT_CURRENCY  # codigo ISO 4217 (PEN, USD, ...)
         self.tax_rate = None              # tasa por defecto de las lineas (0.18 = IGV 18 %); None = sin impuesto
         self.supplier = PartyInfo()
@@ -135,6 +143,34 @@ class InvoiceEntity:
     @property
     def due_date(self):
         return parse_date(self.duedate) if self.duedate else None
+
+    @property
+    def file_name(self) -> str:
+        """Nombre del archivo XML: RUC-TIPO-SERIE-NUMERO.xml (ej. 20123456789-01-F001-524.xml).
+
+        Exige el RUC del emisor (11 digitos), un tipo de documento valido y un id con
+        formato SERIE-NUMERO (4 caracteres en mayuscula, guion y hasta 8 digitos).
+        """
+        ruc = (self.supplier.tax_id or "").strip()
+        if not _RUC.match(ruc):
+            raise ValueError(
+                "Para nombrar el archivo hace falta el RUC del emisor (11 digitos) "
+                "en factura.supplier.tax_id."
+            )
+        self._check_document_type()
+        partes = _SERIE_NUMERO.match(str(self.id))
+        if not partes:
+            raise ValueError(
+                f"El id '{self.id}' no tiene formato SERIE-NUMERO (ej. F001-524: "
+                "4 caracteres en mayuscula, guion y hasta 8 digitos)."
+            )
+        serie, numero = partes.groups()
+        return f"{ruc}-{self.document_type}-{serie}-{numero}.xml"
+
+    def _check_document_type(self) -> None:
+        if self.document_type not in DOCUMENT_TYPES:
+            validos = ", ".join(f"{k} ({v})" for k, v in DOCUMENT_TYPES.items())
+            raise ValueError(f"Tipo de documento invalido '{self.document_type}'. Use: {validos}.")
 
     # ---- Impuestos y totales ----
     def rate_for(self, item: InvoiceLineItem) -> Optional[float]:
@@ -178,6 +214,7 @@ class InvoiceEntity:
     def validate(self) -> None:
         """Reglas de negocio. Lanza ValueError si la factura no se puede emitir."""
         self.currency_code
+        self._check_document_type()
         _check_rate(self.tax_rate, "Factura")
         if not self.line:
             raise ValueError("La factura necesita al menos una linea (el XSD exige InvoiceLine).")

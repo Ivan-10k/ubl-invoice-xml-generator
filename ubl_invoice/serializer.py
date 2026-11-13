@@ -2,6 +2,8 @@
 from xsdata.formats.dataclass.serializers import XmlSerializer
 from xsdata.formats.dataclass.serializers.config import SerializerConfig
 
+from ubl_invoice.encoding import XML_ENCODING
+
 NS_MAP = {
     None: "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
@@ -11,7 +13,7 @@ NS_MAP = {
 
 class XmlInvoiceSerializer:
     def __init__(self, indent: str = "  "):
-        config = SerializerConfig(indent=indent, xml_declaration=True, encoding="UTF-8")
+        config = SerializerConfig(indent=indent, xml_declaration=True, encoding=XML_ENCODING)
         self._serializer = XmlSerializer(config=config)
 
     def serialize(self, ubl_invoice) -> str:

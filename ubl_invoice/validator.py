@@ -4,6 +4,7 @@ from pathlib import Path
 
 from lxml import etree
 
+from ubl_invoice.encoding import encode_xml
 from ubl_invoice.ports import ValidationResult
 
 __all__ = ["DEFAULT_XSD", "ValidationResult", "XsdValidator"]
@@ -22,6 +23,6 @@ class XsdValidator:
 
     def validate(self, xml: str) -> ValidationResult:
         schema = _load_schema(self._xsd_path)
-        doc = etree.fromstring(xml.encode("utf-8"))
+        doc = etree.fromstring(encode_xml(xml))
         valid = schema.validate(doc)
         return ValidationResult(valid, [str(e) for e in schema.error_log])
